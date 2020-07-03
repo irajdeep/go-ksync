@@ -4,7 +4,10 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
+	"os"
+	"os/signal"
 	"strconv"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	v1 "k8s.io/api/core/v1"
@@ -13,6 +16,7 @@ import (
 
 var (
 	configmapName = flag.String("config-map-name", "namespace-controller", "pass the configmap name to be watched")
+	syncInterval  = flag.Duration("sync-duration", 10*time.Second, "sync interval for syncing configmap")
 )
 
 // Constants to connect to local database
@@ -47,14 +51,12 @@ func getResourceQuota(cpu, memory int) *v1.ResourceQuota {
 	}
 }
 
-func main() {
-	dsn := DbUser + ":" + DbPass + "@" + DbHost + "/" + DbName + "?charset=utf8"
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		panic(err.Error())
-	}
-	defer db.Close()
+// TODO:
+func updateConfigMap() error {
+	return nil
+}
 
+func syncConfigMap(db *sql.DB) {
 	// Fetch all the rowns from the table
 	rows, err := db.Query("SELECT * FROM Resource")
 	if err != nil {
@@ -71,7 +73,32 @@ func main() {
 		resourceQuotas = append(resourceQuotas, getResourceQuota(c, m))
 	}
 
-	// for _, r := range resourceQuotas {
-	// 	fmt.Printf("%+v\n", r)
-	// }
+	for _, r := range resourceQuotas {
+		fmt.Printf("%+v\n", r)
+	}
+}
+
+func main() {
+	dsn := DbUser + ":" + DbPass + "@" + DbHost + "/" + DbName + "?charset=utf8"
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		panic(err.Error())
+	}
+	defer db.Close()
+	syncConfigMap(db)
+
+	ticker := time.NewTicker(*syncInterval)
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+
+	for {
+		select {
+		case <-c:
+			fmt.Println("logging off")
+			os.Exit(0)
+		case <-ticker.C:
+			syncConfigMap(db)
+
+		}
+	}
 }
