@@ -20,18 +20,15 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+// (TODO): Remove database configurations from here and read them from a secret or something
 var (
 	configmapName = flag.String("config-map-name", "namespace-controller", "pass the configmap name to be watched")
 	syncInterval  = flag.Duration("sync-duration", 10*time.Second, "sync interval for syncing configmap")
 	namespace     = flag.String("namespace", "namespace-controller", "namespace the syncer cares to sync the cm in")
-)
-
-// Constants to connect to local database
-const (
-	DbHost = "tcp(127.0.0.1:3306)"
-	DbName = "quota"
-	DbUser = "root"
-	DbPass = "abcd"
+	dbHost        = flag.String("db-host", "tcp(127.0.0.1:3306)", "database host to connect to")
+	dbName        = flag.String("db-name", "quota", "database to connect to")
+	dbUser        = flag.String("db-user", "root", "database user")
+	dbPass        = flag.String("db-pass", "abcd", "database passord")
 )
 
 // Syncer struct holds the common fields to be used by syncer
@@ -129,11 +126,14 @@ func syncConfigMap(db *sql.DB) {
 }
 
 func main() {
-	dsn := DbUser + ":" + DbPass + "@" + DbHost + "/" + DbName + "?charset=utf8"
+	flag.Parse()
+
+	dsn := *dbUser + ":" + *dbPass + "@" + *dbHost + "/" + *dbName + "?charset=utf8"
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		panic(err.Error())
 	}
+
 	defer db.Close()
 	syncConfigMap(db)
 
