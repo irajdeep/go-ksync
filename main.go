@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 var (
@@ -26,6 +29,29 @@ const (
 	DbUser = "root"
 	DbPass = "abcd"
 )
+
+// Syncer struct holds the common fields to be used by syncer
+type Syncer struct {
+	client kubernetes.Clientset
+}
+
+// NewSyncer returns a new syncer object
+func NewSyncer() *Syncer {
+	kubeconfig := filepath.Join(
+		os.Getenv("HOME"), ".kube", "config",
+	)
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	client, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	return &Syncer{client: *client}
+}
 
 // TODO(rdas): give some thought to units or maybe take the input in databse as string??
 func getCPUMilli(cpu int) string {
