@@ -8,11 +8,14 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -20,6 +23,7 @@ import (
 var (
 	configmapName = flag.String("config-map-name", "namespace-controller", "pass the configmap name to be watched")
 	syncInterval  = flag.Duration("sync-duration", 10*time.Second, "sync interval for syncing configmap")
+	namespace     = flag.String("namespace", "namespace-controller", "namespace the syncer cares to sync the cm in")
 )
 
 // Constants to connect to local database
@@ -33,6 +37,8 @@ const (
 // Syncer struct holds the common fields to be used by syncer
 type Syncer struct {
 	client kubernetes.Clientset
+	mu     sync.Mutex // guards data
+	data   map[string]string
 }
 
 // NewSyncer returns a new syncer object
@@ -50,7 +56,10 @@ func NewSyncer() *Syncer {
 		panic(err.Error())
 	}
 
-	return &Syncer{client: *client}
+	return &Syncer{
+		client: *client,
+		data:   make(map[string]string),
+	}
 }
 
 // TODO(rdas): give some thought to units or maybe take the input in databse as string??
@@ -77,9 +86,24 @@ func getResourceQuota(cpu, memory int) *v1.ResourceQuota {
 	}
 }
 
-// TODO:
-func updateConfigMap() error {
-	return nil
+func (s *Syncer) updateConfigMap() {
+	_, err := s.client.CoreV1().ConfigMaps(*namespace).Get(*configmapName, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		fmt.Printf("configmap: %s not found in namespace: %s, creating it ....", *configmapName, *namespace)
+
+		cm := &v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: *configmapName,
+			},
+		}
+		cm, err := s.client.CoreV1().ConfigMaps(*namespace).Create(cm)
+		if err != nil {
+			fmt.Printf("failed to create configmap: %v\n", err)
+		} else {
+			fmt.Printf("successfully created config map: %v", cm)
+		}
+	}
+
 }
 
 func syncConfigMap(db *sql.DB) {
@@ -113,6 +137,8 @@ func main() {
 	defer db.Close()
 	syncConfigMap(db)
 
+	s := NewSyncer()
+
 	ticker := time.NewTicker(*syncInterval)
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
@@ -124,7 +150,7 @@ func main() {
 			os.Exit(0)
 		case <-ticker.C:
 			syncConfigMap(db)
-
+			s.updateConfigMap()
 		}
 	}
 }
