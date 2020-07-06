@@ -35,7 +35,8 @@ var (
 type Syncer struct {
 	client kubernetes.Clientset
 	mu     sync.Mutex // guards data
-	data   map[string]string
+	data   map[string]*v1.ResourceQuota
+	db     *sql.DB
 }
 
 // NewSyncer returns a new syncer object
@@ -53,9 +54,16 @@ func NewSyncer() *Syncer {
 		panic(err.Error())
 	}
 
+	dsn := *dbUser + ":" + *dbPass + "@" + *dbHost + "/" + *dbName + "?charset=utf8"
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		panic(err.Error())
+	}
+
 	return &Syncer{
 		client: *client,
-		data:   make(map[string]string),
+		data:   make(map[string]*v1.ResourceQuota),
+		db:     db,
 	}
 }
 
@@ -103,41 +111,36 @@ func (s *Syncer) updateConfigMap() {
 
 }
 
-func syncConfigMap(db *sql.DB) {
+func (s *Syncer) syncConfigMap() {
 	// Fetch all the rowns from the table
-	rows, err := db.Query("SELECT * FROM Resource")
+	rows, err := s.db.Query("SELECT * FROM Resource")
 	if err != nil {
 		panic(err.Error())
 	}
 
-	resourceQuotas := make([]*v1.ResourceQuota, 0)
-	var id, p, c, m int
+	var (
+		id, pID, c, m int
+		pName         string
+	)
 
 	for rows.Next() {
-		if err := rows.Scan(&id, &p, &c, &m); err != nil {
+		if err := rows.Scan(&id, &pID, &pName, &c, &m); err != nil {
 			panic(err.Error())
 		}
-		resourceQuotas = append(resourceQuotas, getResourceQuota(c, m))
+		s.data[pName] = getResourceQuota(c, m)
 	}
 
-	for _, r := range resourceQuotas {
-		fmt.Printf("%+v\n", r)
+	// log the projectName to ResourceQuotaMapping
+	for k, v := range s.data {
+		fmt.Printf("%s : %v\n", k, v)
 	}
 }
 
 func main() {
 	flag.Parse()
 
-	dsn := *dbUser + ":" + *dbPass + "@" + *dbHost + "/" + *dbName + "?charset=utf8"
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	defer db.Close()
-	syncConfigMap(db)
-
 	s := NewSyncer()
+	defer s.db.Close()
 
 	ticker := time.NewTicker(*syncInterval)
 	c := make(chan os.Signal, 1)
@@ -149,7 +152,7 @@ func main() {
 			fmt.Println("logging off")
 			os.Exit(0)
 		case <-ticker.C:
-			syncConfigMap(db)
+			s.syncConfigMap()
 			s.updateConfigMap()
 		}
 	}
