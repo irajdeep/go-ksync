@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -91,8 +92,25 @@ func getResourceQuota(cpu, memory int) *v1.ResourceQuota {
 	}
 }
 
+func (s *Syncer) getDataFromCache() map[string]string {
+	m := make(map[string]string)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for k, v := range s.data {
+		j, err := json.Marshal(v)
+		if err != nil {
+			panic(err.Error())
+		}
+		m[k] = string(j)
+	}
+	return m
+}
+
 func (s *Syncer) updateConfigMap() {
-	_, err := s.client.CoreV1().ConfigMaps(*namespace).Get(*configmapName, metav1.GetOptions{})
+	cm, err := s.client.CoreV1().ConfigMaps(*namespace).Get(*configmapName, metav1.GetOptions{})
+
 	if errors.IsNotFound(err) {
 		fmt.Printf("configmap: %s not found in namespace: %s, creating it ....", *configmapName, *namespace)
 
@@ -109,9 +127,19 @@ func (s *Syncer) updateConfigMap() {
 		}
 	}
 
+	// Update the configmap for now
+	// (TODO) : Perform a patch instead of update also we might not want
+	// to change the entire datasection of the configmap and just the diff
+	cm.Data = s.getDataFromCache()
+
+	cm, err = s.client.CoreV1().ConfigMaps(*namespace).Update(cm)
+	if err != nil {
+		panic(err.Error())
+	}
+	fmt.Printf("sucessfully updated configmap in namespace: %s, cm: %s", *namespace, *configmapName)
 }
 
-func (s *Syncer) syncConfigMap() {
+func (s *Syncer) syncCache() {
 	// Fetch all the rowns from the table
 	rows, err := s.db.Query("SELECT * FROM Resource")
 	if err != nil {
@@ -123,16 +151,14 @@ func (s *Syncer) syncConfigMap() {
 		pName         string
 	)
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	for rows.Next() {
 		if err := rows.Scan(&id, &pID, &pName, &c, &m); err != nil {
 			panic(err.Error())
 		}
 		s.data[pName] = getResourceQuota(c, m)
-	}
-
-	// log the projectName to ResourceQuotaMapping
-	for k, v := range s.data {
-		fmt.Printf("%s : %v\n", k, v)
 	}
 }
 
@@ -152,7 +178,7 @@ func main() {
 			fmt.Println("logging off")
 			os.Exit(0)
 		case <-ticker.C:
-			s.syncConfigMap()
+			s.syncCache()
 			s.updateConfigMap()
 		}
 	}
