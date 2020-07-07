@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -112,18 +113,18 @@ func (s *Syncer) updateConfigMap() {
 	cm, err := s.client.CoreV1().ConfigMaps(*namespace).Get(*configmapName, metav1.GetOptions{})
 
 	if errors.IsNotFound(err) {
-		fmt.Printf("configmap: %s not found in namespace: %s, creating it ....", *configmapName, *namespace)
+		log.Printf("configmap: %s not found in namespace: %s, creating it ....\n", *configmapName, *namespace)
 
-		cm := &v1.ConfigMap{
+		cm = &v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: *configmapName,
 			},
 		}
-		cm, err := s.client.CoreV1().ConfigMaps(*namespace).Create(cm)
+		cm, err = s.client.CoreV1().ConfigMaps(*namespace).Create(cm)
 		if err != nil {
-			fmt.Printf("failed to create configmap: %v\n", err)
+			log.Printf("failed to create configmap: %v\n", err)
 		} else {
-			fmt.Printf("successfully created config map: %v", cm)
+			log.Printf("successfully created config map: %v", cm)
 		}
 	}
 
@@ -136,7 +137,7 @@ func (s *Syncer) updateConfigMap() {
 	if err != nil {
 		panic(err.Error())
 	}
-	fmt.Printf("sucessfully updated configmap in namespace: %s, cm: %s", *namespace, *configmapName)
+	log.Printf("sucessfully updated configmap in namespace: %s, cm: %s", *namespace, *configmapName)
 }
 
 func (s *Syncer) syncCache() {
@@ -175,7 +176,7 @@ func main() {
 	for {
 		select {
 		case <-c:
-			fmt.Println("logging off")
+			log.Println("logging off")
 			os.Exit(0)
 		case <-ticker.C:
 			s.syncCache()
